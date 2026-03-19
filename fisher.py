@@ -22,7 +22,6 @@ import pyautogui
 import time
 import random
 import threading
-from threading import Lock
 from pynput import keyboard as kb
 
 # ── Failsafe: move mouse to top-left corner to crash pyautogui intentionally ──
@@ -61,11 +60,12 @@ class ArcaneOdysseyFisher:
         self.running = False
         self.state = "IDLE"
         self._thread = None
-        self.sct = mss.mss()
-        self._sct_lock = Lock()
+        self.sct = None  # created inside the worker thread
 
-        mon = self.sct.monitors[1]  # primary monitor
-        sw, sh = mon["width"], mon["height"]
+        # Read screen dimensions on the main thread (short-lived instance)
+        with mss.mss() as tmp:
+            mon = tmp.monitors[1]
+            sw, sh = mon["width"], mon["height"]
 
         self.region = {
             "top":    int(sh * REGION_TOP_FRAC),
@@ -81,9 +81,8 @@ class ArcaneOdysseyFisher:
 
     def _exclamation_visible(self) -> bool:
         """Return True when enough red pixels are found in the watch region."""
-        with self._sct_lock:
-            raw = self.sct.grab(self.region)
-            img = np.frombuffer(raw.bgra, dtype=np.uint8).reshape(raw.height, raw.width, 4)
+        raw = self.sct.grab(self.region)
+        img = np.frombuffer(raw.bgra, dtype=np.uint8).reshape(raw.height, raw.width, 4)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGRA2HSV)
 
         mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
@@ -101,6 +100,8 @@ class ArcaneOdysseyFisher:
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def _loop(self):
+        # Create mss instance on this thread — Windows handles are thread-local
+        self.sct = mss.mss()
         time.sleep(1.0)  # brief pause so you can alt-tab into Roblox
         self._cast()
         self.state = "WAITING"
