@@ -16,7 +16,6 @@ Setup:
 """
 
 import mss
-import cv2
 import numpy as np
 import pyautogui
 import time
@@ -35,22 +34,21 @@ CLICK_INTERVAL = 0.04   # Seconds between clicks while reeling (~25 cps)
 RECAST_DELAY = (0.2, 0.4)   # Random delay (seconds) before recasting after catch
 
 # How many red pixels must be present to count as a "bite"
-# Increase this if you're getting false positives, lower it if bites are missed
-MIN_RED_PIXELS = 40
+# Increase if you're getting false positives, lower if bites are missed
+MIN_RED_PIXELS = 30
 
-# Detection region as fraction of screen (tweak if your character is off-center)
-# Default: center third of screen width, middle vertical band
-REGION_LEFT_FRAC   = 0.33
-REGION_TOP_FRAC    = 0.20
-REGION_WIDTH_FRAC  = 0.34
-REGION_HEIGHT_FRAC = 0.50
+# Detection region as fraction of screen
+# Covers center strip where the ! box appears above the character's head
+REGION_LEFT_FRAC   = 0.38
+REGION_TOP_FRAC    = 0.15
+REGION_WIDTH_FRAC  = 0.24
+REGION_HEIGHT_FRAC = 0.45
 
-# Red color bounds in HSV (OpenCV uses H: 0-179, S: 0-255, V: 0-255)
-# Two ranges needed because red wraps around the hue wheel
-RED_RANGES = [
-    (np.array([0,   160, 160]), np.array([8,  255, 255])),
-    (np.array([172, 160, 160]), np.array([179, 255, 255])),
-]
+# Pure RGB thresholds for the bright red ! mark (in BGRA channel order)
+# R > 180, G < 80, B < 80  →  vivid red
+RED_R_MIN = 180
+RED_G_MAX = 80
+RED_B_MAX = 80
 
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -82,14 +80,14 @@ class ArcaneOdysseyFisher:
     def _exclamation_visible(self) -> bool:
         """Return True when enough red pixels are found in the watch region."""
         raw = self.sct.grab(self.region)
+        # mss returns BGRA — channels: 0=B, 1=G, 2=R, 3=A
         img = np.frombuffer(raw.bgra, dtype=np.uint8).reshape(raw.height, raw.width, 4)
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGRA2HSV)
-
-        mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-        for lo, hi in RED_RANGES:
-            mask = cv2.bitwise_or(mask, cv2.inRange(hsv, lo, hi))
-
-        return int(cv2.countNonZero(mask)) >= MIN_RED_PIXELS
+        red_mask = (
+            (img[:, :, 2] >= RED_R_MIN) &  # R high
+            (img[:, :, 1] <= RED_G_MAX) &  # G low
+            (img[:, :, 0] <= RED_B_MAX)    # B low
+        )
+        return int(np.count_nonzero(red_mask)) >= MIN_RED_PIXELS
 
     # ── Game actions ──────────────────────────────────────────────────────────
 
